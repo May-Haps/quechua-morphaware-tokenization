@@ -1,4 +1,4 @@
-from typing import Any, cast, TypedDict
+from typing import Any, cast, Literal, TypedDict
 
 from datasets import Dataset
 
@@ -23,6 +23,7 @@ def get_device():
 def qs_tokenized_dataloader(
         dataset: Dataset,
         tokenizer: NllbTokenizer,
+        source_lang: Literal['spa_Latn', 'quy_Latn'],
         batch_size: int,
         max_length: int = 512,
         shuffle: bool = True,
@@ -41,9 +42,10 @@ def qs_tokenized_dataloader(
         n_tokenize_workers: number of processes to help with pre-tokenization
     '''
     assert('qu' in dataset.column_names and 'es' in dataset.column_names)
+    tokenizer.src_lang = source_lang
 
     tokenized = dataset.map(
-        _qs_tokenize_fn(tokenizer, max_length),
+        _qs_tokenize_fn(tokenizer, source_lang, max_length),
         batched=True,
         num_proc=n_tokenize_workers
     )
@@ -64,11 +66,22 @@ def qs_tokenized_dataloader(
         collate_fn=collector
     )
 
-def _qs_tokenize_fn(tokenizer: NllbTokenizer, max_length: int = 512):
+def get_lang_abbrev(lang: Literal['spa_Latn', 'quy_Latn']) -> Literal['es', 'qu']:
+    if lang == 'spa_Latn':
+        return 'es'
+    assert lang == 'quy_Latn'
+    return 'qu'
+
+def _qs_tokenize_fn(
+        tokenizer: NllbTokenizer,
+        source_lang: Literal['spa_Latn', 'quy_Latn'],
+        max_length: int = 512
+):
+    target_lang = 'quy_Latn' if source_lang == 'spa_Latn' else 'spa_Latn'
     def tokenize_helper(batch: Any):
         return tokenizer(
-            batch['qu'],
-            text_target=batch['es'],
+            batch[get_lang_abbrev(source_lang)],
+            text_target=batch[get_lang_abbrev(target_lang)],
             padding=False,
             truncation=True,
             max_length=max_length
