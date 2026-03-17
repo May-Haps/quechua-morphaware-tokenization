@@ -19,8 +19,8 @@ batch_size = 8
 max_length = 512
 shuffle = False
 
-n_dataloader_workers = 0
-n_dataloader_workers = 4
+n_dataloader_workers = 1
+n_tokenize_workers = 4
 num_beams = 1
 
 set_to_eval = 'test'
@@ -33,6 +33,8 @@ if __name__ == '__main__':
     qs_dataset_dict = load_dataset(quechua_spanish_dataset_id)
     qs_dataset = qs_dataset_dict[set_to_eval]
 
+    tokenizer.src_lang = source_lang
+
     dataset_loader = qs_tokenized_dataloader(
         qs_dataset_dict[set_to_eval],
         tokenizer,
@@ -40,10 +42,9 @@ if __name__ == '__main__':
         max_length,
         shuffle,
         n_dataloader_workers,
-        n_dataloader_workers
+        n_tokenize_workers
     )
 
-    tokenizer.src_lang = source_lang
     bos_target_lang = tokenizer.convert_tokens_to_ids(target_lang)
 
     predicted_translation: list[str] = []

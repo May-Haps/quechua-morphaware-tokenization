@@ -5,7 +5,7 @@ from datasets import Dataset
 import torch
 from torch.utils.data import DataLoader
 
-from transformers import M2M100ForConditionalGeneration, NllbTokenizer
+from transformers import DataCollatorForSeq2Seq, M2M100ForConditionalGeneration, NllbTokenizer
 
 class TokenizedBatch(TypedDict):
     input_ids: torch.Tensor
@@ -48,14 +48,20 @@ def qs_tokenized_dataloader(
         num_proc=n_tokenize_workers
     )
     tokenized = tokenized.select_columns(['input_ids', 'attention_mask', 'labels'])
-    tokenized.set_format(type='torch')
+
+    collector = DataCollatorForSeq2Seq(
+        tokenizer,
+        padding=True,
+        return_tensors='pt'
+    )
 
     return DataLoader(
         cast(torch.utils.data.Dataset[TokenizedBatch], tokenized),
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=n_dataloader_workers,
-        persistent_workers=n_dataloader_workers > 0
+        persistent_workers=n_dataloader_workers > 0,
+        collate_fn=collector
     )
 
 def _qs_tokenize_fn(tokenizer: NllbTokenizer, max_length: int = 512):
@@ -63,7 +69,7 @@ def _qs_tokenize_fn(tokenizer: NllbTokenizer, max_length: int = 512):
         return tokenizer(
             batch['qu'],
             text_target=batch['es'],
-            padding=True,
+            padding=False,
             truncation=True,
             max_length=max_length
         )
