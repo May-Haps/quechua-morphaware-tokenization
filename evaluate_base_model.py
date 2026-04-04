@@ -4,15 +4,14 @@ from datasets import load_dataset
 from sacrebleu import corpus_bleu, corpus_chrf
 import torch
 
-from utils import get_device, get_lang_abbrev, load_model, TokenizedBatch, qs_tokenized_dataloader
+from common.utils import get_device, get_lang_abbrev, load_model, TokenizedBatch, qs_tokenized_dataloader, \
+    SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 # DOCS: https://huggingface.co/docs/transformers/model_doc/nllb
 
-# NOTE after running i got this error: "It looks like you forgot to detokenize your test data, which may hurt your score."
-
-quechua_spanish_dataset_id = "somosnlp-hackathon-2022/spanish-to-quechua"
-source_lang = "spa_Latn"
-target_lang = "quy_Latn"
+quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
+source_lang = SPANISH_LANG_ID
+target_lang = QUECHUA_LANG_ID
 
 max_length_response = 600
 batch_size = 8
@@ -26,9 +25,7 @@ set_to_eval = 'test'
 
 if __name__ == '__main__':
     device = get_device()
-
     tokenizer, model = load_model(device)
-
     qs_dataset_dict = load_dataset(quechua_spanish_dataset_id)
     qs_dataset = qs_dataset_dict[set_to_eval]
 
@@ -53,10 +50,10 @@ if __name__ == '__main__':
     n_batches = len(dataset_loader)
 
     with torch.no_grad():
+        batch: TokenizedBatch
         for i, batch in enumerate(dataset_loader):
             if ((i + 1) % 10 == 0):
                 print(f'Starting batch {i + 1}/{n_batches}')
-            batch: TokenizedBatch
 
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
@@ -71,10 +68,18 @@ if __name__ == '__main__':
                 num_beams=num_beams
             ))
 
-            predicted_translation.extend(tokenizer.batch_decode(output, skip_special_tokens=True, clean_up_tokenization_spaces=True))
+            predicted_translation.extend(
+                tokenizer.batch_decode(
+                    output,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True
+                )
+            )
 
     bleu_score = corpus_bleu(predicted_translation, [reference_translations])
     chrf_score = corpus_chrf(predicted_translation, [reference_translations])
+    chrf_plpl_score = corpus_chrf(predicted_translation, [reference_translations], word_order=2)
 
     print(f'BLEU: {bleu_score.score:.3f}')
     print(f'chrF: {chrf_score.score:.3f}')
+    print(f'chrF++: {chrf_plpl_score.score:.3f}')
