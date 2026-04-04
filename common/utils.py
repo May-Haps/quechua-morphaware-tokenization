@@ -1,28 +1,43 @@
-from typing import Any, cast, TypedDict
+from typing import Any, cast, Literal, TypedDict
 
 from datasets import Dataset
 
 import torch
 from torch.utils.data import DataLoader
-
 from transformers import DataCollatorForSeq2Seq, M2M100ForConditionalGeneration, NllbTokenizer
+
+QUECHUA_LANG_ID: Literal['quy_Latn'] = 'quy_Latn'
+SPANISH_LANG_ID: Literal['spa_Latn'] = 'spa_Latn'
 
 class TokenizedBatch(TypedDict):
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
     labels: torch.Tensor
 
+def get_device():
+    return 'cuda' if torch.cuda.is_available() else 'cpu'
+
+def get_lang_abbrev(lang: Literal['spa_Latn', 'quy_Latn']) -> Literal['es', 'qu']:
+    if lang == SPANISH_LANG_ID:
+        return 'es'
+    return 'qu'
+
+def get_other_lang(lang: Literal['spa_Latn', 'quy_Latn']) -> Literal['spa_Latn', 'quy_Latn']:
+    return QUECHUA_LANG_ID if lang == SPANISH_LANG_ID else SPANISH_LANG_ID
+
 def load_model(device: str, load_path: str = 'nllb-model') -> tuple[NllbTokenizer, M2M100ForConditionalGeneration]:
     tokenizer = NllbTokenizer.from_pretrained(load_path)
     model = M2M100ForConditionalGeneration.from_pretrained(load_path, device_map=device)
     return tokenizer, model
 
-def get_device():
-    return 'cuda' if torch.cuda.is_available() else 'cpu'
+def save_model(tokenizer: NllbTokenizer, model: M2M100ForConditionalGeneration, save_path: str) -> None:
+    tokenizer.save_pretrained(save_path)
+    model.save_pretrained(save_path)
 
 def qs_tokenized_dataloader(
         dataset: Dataset,
         tokenizer: NllbTokenizer,
+        source_lang: Literal['spa_Latn', 'quy_Latn'],
         batch_size: int,
         max_length: int = 512,
         shuffle: bool = True,
@@ -41,9 +56,11 @@ def qs_tokenized_dataloader(
         n_tokenize_workers: number of processes to help with pre-tokenization
     '''
     assert('qu' in dataset.column_names and 'es' in dataset.column_names)
+    tokenizer.src_lang = source_lang
+    tokenizer.tgt_lang = get_other_lang(source_lang)
 
     tokenized = dataset.map(
-        _qs_tokenize_fn(tokenizer, max_length),
+        _qs_tokenize_fn(tokenizer, source_lang, max_length),
         batched=True,
         num_proc=n_tokenize_workers
     )
@@ -64,13 +81,48 @@ def qs_tokenized_dataloader(
         collate_fn=collector
     )
 
-def _qs_tokenize_fn(tokenizer: NllbTokenizer, max_length: int = 512):
+def _qs_tokenize_fn(
+        tokenizer: NllbTokenizer,
+        source_lang: Literal['spa_Latn', 'quy_Latn'],
+        max_length: int = 512
+):
+    target_lang = get_other_lang(source_lang)
     def tokenize_helper(batch: Any):
         return tokenizer(
-            batch['qu'],
-            text_target=batch['es'],
+            batch[get_lang_abbrev(source_lang)],
+            text_target=batch[get_lang_abbrev(target_lang)],
             padding=False,
             truncation=True,
-            max_length=max_length
+            max_length=max_length,
         )
     return tokenize_helper
+
+
+# Dataset structure
+
+# quechua_only_dataset_id = 'Llamacha/monolingual-quechua-iic'
+# print(q_dataset)
+# DatasetDict({
+#     train: Dataset({
+#         features: ['text'],
+#         num_rows: 175408
+#     })
+# })
+
+# quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
+# print(qs_dataset)
+# DatasetDict({
+#     train: Dataset({
+#         features: ['es', 'qu'],
+#         num_rows: 102747
+#     })
+#     validation: Dataset({
+#         features: ['es', 'qu'],
+#         num_rows: 12844
+#     })
+#     test: Dataset({
+#         features: ['es', 'qu'],
+#         num_rows: 12843
+#     })
+# })
+

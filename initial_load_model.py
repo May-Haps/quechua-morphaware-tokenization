@@ -1,7 +1,7 @@
 from transformers import M2M100ForConditionalGeneration, NllbTokenizer
 
 if __name__ == '__main__':
-    model_id = "facebook/nllb-200-distilled-600M"
+    model_id = 'facebook/nllb-200-distilled-600M'
     save_path = './nllb-model'
 
     tokenizer: NllbTokenizer = NllbTokenizer.from_pretrained(model_id)
