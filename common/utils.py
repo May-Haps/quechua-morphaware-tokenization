@@ -6,6 +6,8 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import DataCollatorForSeq2Seq, M2M100ForConditionalGeneration, NllbTokenizer
 
+from common.process_word_windows import encode_text
+
 QUECHUA_LANG_ID: Literal['quy_Latn'] = 'quy_Latn'
 SPANISH_LANG_ID: Literal['spa_Latn'] = 'spa_Latn'
 
@@ -43,6 +45,7 @@ def qs_tokenized_dataloader(
         shuffle: bool = True,
         n_dataloader_workers: int = 0,
         n_tokenize_workers: int = 0,
+        use_fst: bool = False
 ) -> DataLoader[TokenizedBatch]:
     '''
     Returns a dataloader that's pre-tokenized.
@@ -54,13 +57,13 @@ def qs_tokenized_dataloader(
         shuffle: whether or not to shuffle the dataloader
         n_dataloader_workers: number processes to load data in parallel for dataloader
         n_tokenize_workers: number of processes to help with pre-tokenization
+        use_fst: If true use run_fst to tokenize Quechua, else use nllb tokenizer
     '''
     assert('qu' in dataset.column_names and 'es' in dataset.column_names)
-    tokenizer.src_lang = source_lang
-    tokenizer.tgt_lang = get_other_lang(source_lang)
+    qs_token_fn = _qs_tokenize_fst_fn if use_fst else _qs_tokenize_fn
 
     tokenized = dataset.map(
-        _qs_tokenize_fn(tokenizer, source_lang, max_length),
+        qs_token_fn(tokenizer, source_lang, max_length),
         batched=True,
         num_proc=n_tokenize_workers
     )
@@ -71,6 +74,9 @@ def qs_tokenized_dataloader(
         padding=True,
         return_tensors='pt'
     )
+
+    tokenizer.src_lang = source_lang
+    tokenizer.tgt_lang = get_other_lang(source_lang)
 
     return DataLoader(
         cast(torch.utils.data.Dataset[TokenizedBatch], tokenized),
@@ -97,6 +103,50 @@ def _qs_tokenize_fn(
         )
     return tokenize_helper
 
+def _qs_tokenize_fst_fn(
+        tokenizer: NllbTokenizer,
+        source_lang: Literal['spa_Latn', 'quy_Latn'],
+        max_length: int = 512
+):
+
+    def tokenize_helper(batch: Any):
+        qu_batch = batch['qu']
+        es_batch = batch['es']
+
+        tokenizer.src_lang = QUECHUA_LANG_ID
+        qu_batch = [encode_text(t, tokenizer) for t in qu_batch]
+        qu_encoded = tokenizer(
+            qu_batch,
+            padding=False,
+            truncation=True,
+            max_length=max_length,
+            is_split_into_words=True,
+            add_special_tokens=True,
+        )
+
+        tokenizer.src_lang = SPANISH_LANG_ID
+        es_encoded = tokenizer(
+            es_batch,
+            padding=False,
+            truncation=True,
+            max_length=max_length,
+            add_special_tokens=True,
+        )
+
+        if source_lang == QUECHUA_LANG_ID:
+            return {
+                'input_ids': qu_encoded['input_ids'],
+                'attention_mask': qu_encoded['attention_mask'],
+                'labels': es_encoded['input_ids'],
+            }
+        else:
+            return {
+                'input_ids': es_encoded['input_ids'],
+                'attention_mask': es_encoded['attention_mask'],
+                'labels': qu_encoded['input_ids'],
+            }
+
+    return tokenize_helper
 
 # Dataset structure
 

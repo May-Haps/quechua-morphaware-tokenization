@@ -1,29 +1,37 @@
 from datasets import load_dataset
-from transformers import PreTrainedTokenizer
 
 from common.utils import load_model
 from common.vocab_extension import extract_new_tokens, extend_vocabulary
+
+'''
+This script finds the unique morpheme produces by the fst when applied to each string in the spanish 
+to quechua train, test, and validation datasets. After the script updates the nllb model with new token
+entries for each of these fst produced morphemes and then saves the model.
+'''
 
 quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
 
 model_load_path = './nllb-model'
 model_save_path = './nllb-model-fst'
 
-if __name__ == '__main__':
-    tokenizer, model = load_model(model_load_path)
+device = 'cuda'
 
-    fst_tokenizer: PreTrainedTokenizer = ...  # TODO: load FST tokenizer here (ignore specific PreTrainedTokenizer type just a placeholder)
+if __name__ == '__main__':
+    tokenizer, model = load_model(device, model_load_path)
 
     qs_dataset_dict = load_dataset(quechua_spanish_dataset_id)
-    qs_train_dataset = qs_dataset_dict['train']
+
+    dataset_strs = ['train', 'test', 'validation']
+
+    new_tokens: set[str] = set()
 
     print('starting new token extraction')
-    new_tokens: set[str] = extract_new_tokens(qs_train_dataset, fst_tokenizer)
+    for dataset_str in dataset_strs:
+        print(f'extracting tokens from {dataset_str} dataset')
+        new_tokens.update(extract_new_tokens(qs_dataset_dict[dataset_str]))
     print(f'found {len(new_tokens)} new tokens')
 
     old_vocab_size = len(tokenizer)
-
-    # Should we order the vocabulary ?
 
     print('extending the model\'s vocabulary')
     extend_vocabulary(

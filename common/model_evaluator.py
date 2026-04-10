@@ -15,6 +15,7 @@ from common.model_trainer import ModelTrainer
 class TranslationTrainingConfig(TypedDict):
     epochs: int
     batch_size: int
+    batches_per_update: int
     lr: float
     weight_decay: float
     warmup_steps_frac: float
@@ -33,11 +34,11 @@ class TranslationTrainingResult(TypedDict):
     val_metrics: list[TranslationMetrics]
 
 class TranslationEvaluator():
-    '''Trains and evaluates the translation model, recording BLEU/chrF/chrF++ metrics.'''
+    '''Evaluates the finetuning of FST models across different hyperparameters and records the results.'''
 
     _CHECKPOINT_STR_START = 'translation_checkpoint'
-    _MAX_LENGTH = 512
-    _MAX_LENGTH_RESPONSE = 600
+    _MAX_LENGTH = 128
+    _MAX_LENGTH_RESPONSE = 160
     _NUM_BEAMS = 1
     _N_DATALOADER_WORKERS = 1
     _N_TOKENIZE_WORKERS = 4
@@ -57,18 +58,21 @@ class TranslationEvaluator():
         self.old_vocab_size = old_vocab_size
         self.device = get_device() if device is None else device
 
+        self.model.gradient_checkpointing_enable()
+        self.model.config.use_cache = False
+
     def train_model(
             self,
             config: TranslationTrainingConfig
     ) -> TranslationTrainingResult:
         '''
-        Fine-tunes the model using the given config.
-        Computes translation metrics every config['eval_freq'] epochs on the validation set.
-        Saves checkpoints to config['save_path'] if provided.
-        Returns training losses, validation losses, and validation metrics per eval checkpoint.
+        Finetune the model using the given config. This function returns training losses, validation losses, and translation
+        metrics (BLEU, chrF, chrF++) on the validation set every config['eval_freq'] epochs. This function also saves
+        checkpoints to config['save_path'] if it is provided.
         '''
         assert config['epochs'] > 0
         assert config['batch_size'] > 0
+        assert config['batches_per_update'] > 0
         assert config['lr'] > 0
         assert config['weight_decay'] >= 0
         assert 0 <= config['warmup_steps_frac'] <= 1
@@ -83,6 +87,7 @@ class TranslationEvaluator():
             modified_tokenizer=self.tokenizer,
             n_training_epochs=config['epochs'],
             n_batches_train_dataset=len(train_loader),
+            batches_per_update=config['batches_per_update'],
             lr=config['lr'],
             weight_decay=config['weight_decay'],
             warmup_steps_frac=config['warmup_steps_frac'],
@@ -90,6 +95,7 @@ class TranslationEvaluator():
             device=self.device
         )
         trainer.freeze_old_embeddings(self.old_vocab_size)
+        trainer.freeze_encoder()
 
         return self._run_training(trainer, train_loader, val_loader, config)
 
@@ -98,7 +104,7 @@ class TranslationEvaluator():
             batch_size: int,
             split: str = 'test'
     ) -> TranslationMetrics:
-        '''Evaluates the model on the given dataset split and prints the translation metrics.'''
+        '''Evaluates the model on the given dataset split with BLEU, chrF, and chrF++ translation metrics.'''
         loader = self._build_dataloader(split, batch_size=batch_size, shuffle=False)
         metrics = self._compute_translation_metrics(loader, split)
         self._print_translation_metrics(metrics)
@@ -119,8 +125,10 @@ class TranslationEvaluator():
 
         for epoch in range(1, config['epochs'] + 1):
             print(f'--------------- Epoch {epoch}/{config['epochs']} ---------------')
+            print(f'Starting training epoch...')
+            train_loss = trainer.train_epoch(train_loader, config['batches_per_update'])
 
-            train_loss = trainer.train_epoch(train_loader)
+            print(f'Starting validation epoch...')
             val_loss = trainer.eval_epoch(val_loader)
 
             train_losses.append(train_loss)
@@ -129,7 +137,7 @@ class TranslationEvaluator():
             print(f'Epoch {epoch} - train loss: {train_loss:.5f}, val loss: {val_loss:.5f}')
 
             if epoch % config['eval_freq'] == 0:
-                print(f'Computing translation metrics at epoch {epoch}...')
+                print(f'Computing translation metrics on the validation dataset...')
                 metrics = self._compute_translation_metrics(val_loader, 'validation')
                 val_metrics.append(metrics)
                 self._print_translation_metrics(metrics)
@@ -202,14 +210,15 @@ class TranslationEvaluator():
             shuffle: bool
     ) -> DataLoader[TokenizedBatch]:
         return qs_tokenized_dataloader(
-            self.dataset_dict[split],
+            self.dataset_dict[split].select(range(1000)),
             self.tokenizer,
             SPANISH_LANG_ID,
             batch_size,
             max_length=TranslationEvaluator._MAX_LENGTH,
             shuffle=shuffle,
             n_dataloader_workers=TranslationEvaluator._N_DATALOADER_WORKERS,
-            n_tokenize_workers=TranslationEvaluator._N_TOKENIZE_WORKERS
+            n_tokenize_workers=TranslationEvaluator._N_TOKENIZE_WORKERS,
+            use_fst=True
         )
 
     def _format_result(

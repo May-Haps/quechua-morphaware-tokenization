@@ -3,3 +3,5 @@ transformers
 datasets
 accelerate
 sacrebleu
+pypini
+regex

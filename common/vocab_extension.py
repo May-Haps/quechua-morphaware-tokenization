@@ -2,8 +2,9 @@ from typing import cast
 
 from datasets import Dataset
 import torch
-from transformers import M2M100ForConditionalGeneration, NllbTokenizer, PreTrainedTokenizer
+from transformers import M2M100ForConditionalGeneration, NllbTokenizer
 
+from common.process_word_windows import get_unique_fst_morphemes
 from common.utils import get_lang_abbrev, QUECHUA_LANG_ID
 
 def verify_tied_weights(model: M2M100ForConditionalGeneration) -> bool:
@@ -11,14 +12,11 @@ def verify_tied_weights(model: M2M100ForConditionalGeneration) -> bool:
     output_embeddings = cast(torch.nn.Embedding, model.get_output_embeddings())
     return input_embeddings.weight.data_ptr() == output_embeddings.weight.data_ptr()
 
-def extract_new_tokens(
-        dataset: Dataset,
-        tokenizer: PreTrainedTokenizer
-) -> set[str]:
+def extract_new_tokens(dataset: Dataset) -> set[str]:
     qu_samples: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
     new_tokens: set[str] = set()
     for qu_sample in qu_samples:
-        tokens_in_sample = tokenizer.tokenize(qu_sample, add_special_tokens=False)
+        tokens_in_sample = get_unique_fst_morphemes(qu_sample)
         new_tokens.update(tokens_in_sample)
     return new_tokens
 
@@ -55,7 +53,13 @@ def extend_vocabulary(
         embeddings = model.get_input_embeddings()(old_token_conversions)
         pad_positions = old_token_conversions == cast(int, tokenizer.pad_token_id)
         embeddings[pad_positions] = 0
-        avg_embeddings = torch.sum(embeddings, dim=1) / torch.sum((~pad_positions).int(), dim=1).unsqueeze(dim=1)
+
+        non_pad_counts = torch.sum((~pad_positions).int(), dim=1)
+
+        if (non_pad_counts == 0).any():
+            raise ValueError('Some of the new tokens would be initialized with 0 subtokens. I don\'t expect this to happen.')
+
+        avg_embeddings = torch.sum(embeddings, dim=1) / non_pad_counts.unsqueeze(dim=1)
 
         tokens_added = tokenizer.add_tokens(new_tokens)
         
