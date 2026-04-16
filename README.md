@@ -17,7 +17,7 @@ it easier for the model to encode meaning into its vocabulary and elicit better 
 
 ## Approach
 
-1. **Morpheme segmentation.** Quechua words are run through Annette Rios's 
+1. **Morpheme segmentation.** Quechua words are run through a modified version of Annette Rios's 
    `analyzeCuzco` FST, which splits them into their constituent morphemes. Words 
    the FST doesn't recognize fall back to NLLB's original tokenizer.
 2. **Vocabulary extension.** All unique morphemes produced by the FST across the 
@@ -56,7 +56,7 @@ roughly 8 GB of VRAM at the default settings.
 
 ## Morphological analyzer
 
-Morpheme segmentation is performed by the `analyzeCuzco` FST from Annette Rios's 
+Morpheme segmentation is performed by a modified version of the `analyzeCuzco` FST from Annette Rios's 
 Quechua language toolkit, which targets the Southern Quechua (Cuzco) variety.
 
 If you use this project, please cite the underlying analyzer:
