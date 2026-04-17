@@ -1,6 +1,6 @@
 from datasets import load_dataset
 
-from common.utils import load_model
+from common.utils import load_model, get_device
 from common.vocab_extension import extract_new_tokens, extend_vocabulary
 
 '''
@@ -14,7 +14,7 @@ quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
 model_load_path = './nllb-model'
 model_save_path = './nllb-model-fst'
 
-device = 'cuda'
+device = get_device()
 
 if __name__ == '__main__':
     tokenizer, model = load_model(device, model_load_path)
