@@ -210,3 +210,6 @@ nllb-model/
 
 nllb-model-fst/
 checkpoints/
+
+# AWS credentials
+*.pem
