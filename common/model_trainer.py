@@ -9,6 +9,7 @@ from common.utils import get_device, TokenizedBatch
 
 class ModelTrainer():
     '''Class for training FST tokenization models.'''
+    _MODEL_EMBED_MODULE_NAME = 'embed_tokens'
     def __init__(
             self,
             modified_model: M2M100ForConditionalGeneration,
@@ -49,9 +50,11 @@ class ModelTrainer():
             self.hook_handle = input_embeddings.weight.register_hook(hook)
 
     def freeze_encoder(self) -> None:
-        '''Freeze all parameters in the encoder.'''
-        for p in self.model.model.encoder.parameters():
-            p.requires_grad = False
+        '''Freeze all parameters in the encoder except for the embedding layer'''
+        for name, p in self.model.model.encoder.named_parameters():
+            if ModelTrainer._MODEL_EMBED_MODULE_NAME not in name:
+                p.requires_grad = False
+        assert self.model.get_input_embeddings().weight.requires_grad
 
     def unfreeze_old_embeddings(self) -> None:
         '''Unfreeze the embeddings of non-FST tokens.'''
