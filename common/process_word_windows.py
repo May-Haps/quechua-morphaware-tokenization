@@ -1,6 +1,6 @@
 import pynini
 import regex
-from transformers import NllbTokenizer
+from transformers import NllbTokenizer, SPIECE_UNDERLINE
 
 from pywrapfst import SymbolTableView
 
@@ -9,19 +9,24 @@ input_symbols: SymbolTableView = fst.input_symbols()
 output_symbols: SymbolTableView = fst.output_symbols()
 
 EPSILON_IDX =  0
+SMALLEST_CHUNK_FOR_FST = 1
 
 TOKEN_RE = regex.compile(r"[\p{L}']+|[^\s\p{L}']+|\s+")
 
-# NOTE The base model doesn't encode spaces and instead includes start of word tokens (the token 'be' would also
-#   have a complement token '_be' used to represent 'be' at the start of a word). Let me know if this is wrong but according to Claude
-#   each Quechua word has exactly one root morpheme (and its always the first morpheme). If thats right then I think
-#   the morphemes that start with '=' are the roots and so we don't actually need to create new start of word morphemes
-#   as the model can implictly learn that these start of word morphemes represent word boundaries.
-
 # With our current dataset there is only one FST produced token that conflicts with the original vocabulary.
+COLLISION_PREFIX = '⩲'
 _COLLISIONS_MAP = {
-    'SP': '+SP'
+    'SP': f'{COLLISION_PREFIX}SP'
 }
+
+SPECIAL_PREFIX_TAGS = [
+    f'{SPIECE_UNDERLINE}=',
+    f'{SPIECE_UNDERLINE}{COLLISION_PREFIX}',
+    '=',
+    '+',
+    COLLISION_PREFIX,
+    SPIECE_UNDERLINE
+]
 
 def _fix_collision(morpheme: str) -> str:
     if morpheme in _COLLISIONS_MAP:
@@ -51,9 +56,10 @@ def run_fst(word: str) -> list[str] | None:
         if arc is None:
             break
         if arc.olabel != EPSILON_IDX:
-            morphemes.append(_fix_collision(output_symbols.find(arc.olabel)))
+            sym = output_symbols.find(arc.olabel)
+            if len(sym) > 0:
+                morphemes.append(_fix_collision(sym))
         state = arc.nextstate
-
     return morphemes
 
 def get_unique_fst_morphemes(text: str) -> set[str]:
@@ -73,7 +79,7 @@ def get_unique_fst_morphemes(text: str) -> set[str]:
         trail_len = len(tok) - len(tok.rstrip("'"))
         core = tok[lead_len : len(tok) - trail_len] if trail_len else tok[lead_len:]
 
-        if len(core) == 0:
+        if len(core) <= SMALLEST_CHUNK_FOR_FST:
             continue
 
         result = run_fst(core)
@@ -84,39 +90,52 @@ def get_unique_fst_morphemes(text: str) -> set[str]:
 
 def encode_text(text: str, nllb_tokenizer: NllbTokenizer) -> list[str]:
     '''
-    Encodes the text using the fst and falls back to the nllb_tokenizer for text that isn't words or 
-    text that the fst doesn't recognize.
+    Encodes the text using the fst and falls back to the nllb_tokenizer for text that isn't words or
+    text that the fst doesn't recognize. Each whitespace separated chunk becomes a single piece
+    with its morphemes and punctuation concatenated together.
     '''
     text = text.replace("’", "'")
     pieces: list[str] = []
-    
-    for match in TOKEN_RE.finditer(text):
-        tok = match.group(0)
-        
-        if tok.isspace():
-            continue
 
-        if not any(c.isalpha() for c in tok):
-            pieces.extend(nllb_tokenizer.tokenize(tok))
-            continue
-        
-        # Strip outer apostrophes; route them to NLLB if present
-        lead_len = len(tok) - len(tok.lstrip("'"))
-        trail_len = len(tok) - len(tok.rstrip("'"))
-        core = tok[lead_len: len(tok) - trail_len] if trail_len else tok[lead_len:]
-        
-        if lead_len > 0:
-            pieces.extend(nllb_tokenizer.tokenize(tok[:lead_len]))
-        
-        if len(core) > 0:
-            morphemes = run_fst(core)
-            if morphemes is not None:
-                pieces.extend(morphemes)
-            else:
-                # FST failed — fall back to NLLB for this word
-                pieces.extend(nllb_tokenizer.tokenize(core))
-        
-        if trail_len > 0:
-            pieces.extend(nllb_tokenizer.tokenize(tok[-trail_len:]))
-    
+    for chunk in text.split():
+        first_token_is_fst = False
+        chunk_pieces: list[str] = []
+
+        for match in TOKEN_RE.finditer(chunk):
+            tok = match.group(0)
+
+            # if tok.isspace():
+            #     continue
+
+            if not any(c.isalpha() for c in tok):
+                chunk_pieces.append(tok)
+                continue
+
+            lead_len = len(tok) - len(tok.lstrip("'"))
+            trail_len = len(tok) - len(tok.rstrip("'"))
+            core = tok[lead_len: len(tok) - trail_len] if trail_len else tok[lead_len:]
+
+            if lead_len > 0:
+                chunk_pieces.append(tok[:lead_len])
+
+            if len(core) > SMALLEST_CHUNK_FOR_FST:
+                morphemes = run_fst(core)
+                if morphemes is not None:
+                    if len(chunk_pieces) == 0:
+                            first_token_is_fst = True
+                    chunk_pieces.extend(morphemes)
+                else:
+                    chunk_pieces.append(core)
+            elif len(core) > 0:
+                    chunk_pieces.append(core)
+
+            if trail_len > 0:
+                chunk_pieces.append(tok[-trail_len:])
+
+        if len(chunk_pieces) > 0:
+            piece = ''.join(chunk_pieces)
+            if first_token_is_fst:
+                piece = SPIECE_UNDERLINE + piece
+            pieces.append(piece)
+
     return pieces

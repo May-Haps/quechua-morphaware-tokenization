@@ -2,9 +2,9 @@ from typing import cast
 
 from datasets import Dataset
 import torch
-from transformers import M2M100ForConditionalGeneration, NllbTokenizer
+from transformers import M2M100ForConditionalGeneration, NllbTokenizer, SPIECE_UNDERLINE
 
-from common.process_word_windows import get_unique_fst_morphemes
+from common.process_word_windows import get_unique_fst_morphemes, SPECIAL_PREFIX_TAGS
 from common.utils import get_lang_abbrev, QUECHUA_LANG_ID
 
 def verify_tied_weights(model: M2M100ForConditionalGeneration) -> bool:
@@ -15,10 +15,29 @@ def verify_tied_weights(model: M2M100ForConditionalGeneration) -> bool:
 def extract_new_tokens(dataset: Dataset) -> set[str]:
     qu_samples: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
     new_tokens: set[str] = set()
+
     for qu_sample in qu_samples:
         tokens_in_sample = get_unique_fst_morphemes(qu_sample)
         new_tokens.update(tokens_in_sample)
+
+    non_suffix_morphemes = set(filter(lambda x: not x.startswith('+'), new_tokens))
+    for morpheme in non_suffix_morphemes:
+        new_tokens.add(SPIECE_UNDERLINE + morpheme)
+
     return new_tokens
+
+def remove_prefix_tags(token: str) -> str:
+    longest_pft_matched = 0
+    for pft in SPECIAL_PREFIX_TAGS:
+        if token.startswith(pft):
+            longest_pft_matched = max(longest_pft_matched, len(pft))
+    return token[longest_pft_matched:]
+
+def _init_string(token: str) -> str:
+    base = remove_prefix_tags(token)
+    if token.startswith(SPIECE_UNDERLINE):
+        return ' ' + base
+    return base
 
 def extend_vocabulary(
         new_tokens: list[str],
@@ -35,14 +54,17 @@ def extend_vocabulary(
 
     old_vocab = set(tokenizer.get_vocab().keys())
     new_vocab = set(new_tokens)
+
     overlapping_vocab = old_vocab.intersection(new_vocab)
     if len(overlapping_vocab) > 0:
         tokenizer.src_lang = old_tokenizer_src_lang
         raise ValueError(f'found {len(overlapping_vocab)} new tokens in the old vocabulary: {overlapping_vocab}')
 
+    new_tokens_without_special = [_init_string(token) for token in new_tokens]
+
     with torch.no_grad():
         old_token_conversions = cast(torch.Tensor, tokenizer(
-            new_tokens,
+            new_tokens_without_special,
             padding=True,
             truncation=True,
             max_length=init_max_length,

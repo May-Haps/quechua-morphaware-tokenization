@@ -1,5 +1,4 @@
 from datasets import load_dataset
-import json
 
 from transformers import NllbTokenizer
 
@@ -18,7 +17,6 @@ quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
 base_model_load_path = 'nllb-model'
 model_load_path = './nllb-model-fst'
 model_save_path = './nllb-model-fst-trained'
-checkpoint_path = './checkpoints'
 
 if __name__ == '__main__':
     device = get_device()
@@ -44,13 +42,10 @@ if __name__ == '__main__':
         'warmup_steps_frac': 0.1,
         'grad_clip_max_norm': 1.0,
         'eval_freq': 1,
-        'save_path': checkpoint_path,
+        'save_folder_name': model_save_path,
     }
 
     result = evaluator.train_model(config)
-
-    with open('training_result.json', 'w') as f:
-        json.dump(result, f, indent=2)
 
     tokenizer.save_pretrained(model_save_path)
     model.save_pretrained(model_save_path)

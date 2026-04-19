@@ -2,6 +2,7 @@ from typing import cast, TypedDict
 
 import os
 from datetime import datetime
+import json
 
 import torch
 from datasets import DatasetDict
@@ -9,8 +10,9 @@ from sacrebleu import corpus_bleu, corpus_chrf
 from transformers import M2M100ForConditionalGeneration, NllbTokenizer
 from torch.utils.data import DataLoader
 
-from common.utils import get_device, get_lang_abbrev, qs_tokenized_dataloader, TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
 from common.model_trainer import ModelTrainer
+from common.process_word_windows import encode_text
+from common.utils import get_device, get_lang_abbrev, qs_tokenized_dataloader, TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 class TranslationTrainingConfig(TypedDict):
     epochs: int
@@ -21,12 +23,15 @@ class TranslationTrainingConfig(TypedDict):
     warmup_steps_frac: float
     grad_clip_max_norm: float
     eval_freq: int    
-    save_path: str | None
+    save_folder_name: str | None
 
 class TranslationMetrics(TypedDict):
-    bleu: float
-    chrf: float
-    chrf_pp: float
+    bleu_base: float
+    chrf_base: float
+    chrf_pp_base: float
+    bleu_fst: float
+    chrf_fst: float
+    chrf_pp_fst: float
 
 class TranslationTrainingResult(TypedDict):
     train_losses: list[float]
@@ -35,14 +40,14 @@ class TranslationTrainingResult(TypedDict):
 
 class TranslationEvaluator():
     '''Evaluates the finetuning of FST models across different hyperparameters and records the results.'''
-
     _CHECKPOINT_STR_START = 'translation_checkpoint'
+    _TRAINING_RESULTS_FILENAME = 'training_result.json'
     _MAX_LENGTH = 128
     _MAX_LENGTH_RESPONSE = 160
     _NUM_BEAMS = 1
     _N_DATALOADER_WORKERS = 1
     _N_TOKENIZE_WORKERS = 4
-    _TRANSLATION_BATCHES_PER_PRINT = 50
+    _TRANSLATION_BATCHES_PER_PRINT = 1000
 
     def __init__(
             self,
@@ -68,7 +73,7 @@ class TranslationEvaluator():
         '''
         Finetune the model using the given config. This function returns training losses, validation losses, and translation
         metrics (BLEU, chrF, chrF++) on the validation set every config['eval_freq'] epochs. This function also saves
-        checkpoints to config['save_path'] if it is provided.
+        checkpoints to config['save_folder_name'] if it is provided.
         '''
         assert config['epochs'] > 0
         assert config['batch_size'] > 0
@@ -97,7 +102,12 @@ class TranslationEvaluator():
         trainer.freeze_old_embeddings(self.old_vocab_size)
         trainer.freeze_encoder()
 
-        return self._run_training(trainer, train_loader, val_loader, config)
+        results = self._run_training(trainer, train_loader, val_loader, config)
+
+        if config['save_folder_name'] is not None:
+            self._save_training_results(results, config['save_folder_name'])
+
+        return results
 
     def eval_model(
             self,
@@ -142,8 +152,8 @@ class TranslationEvaluator():
                 val_metrics.append(metrics)
                 self._print_translation_metrics(metrics)
 
-            if config['save_path'] is not None:
-                self._save_checkpoint(config['save_path'], epoch, start_time)
+            if config['save_folder_name'] is not None:
+                self._save_checkpoint(config['save_folder_name'], epoch, start_time)
 
         return self._format_result(train_losses, val_losses, val_metrics)
 
@@ -153,7 +163,6 @@ class TranslationEvaluator():
             split: str
     ) -> TranslationMetrics:
         dataset = self.dataset_dict[split]
-        reference_translations: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
         predicted_translations: list[str] = []
 
         bos_target_lang = cast(int, self.tokenizer.convert_tokens_to_ids(QUECHUA_LANG_ID))
@@ -186,22 +195,46 @@ class TranslationEvaluator():
                     )
                 )
 
-        bleu = corpus_bleu(predicted_translations, [reference_translations])
-        chrf = corpus_chrf(predicted_translations, [reference_translations])
-        chrf_pp = corpus_chrf(predicted_translations, [reference_translations], word_order=2)
+        base_reference_translations: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
+
+        bleu_base = corpus_bleu(predicted_translations, [base_reference_translations])
+        chrf_base = corpus_chrf(predicted_translations, [base_reference_translations])
+        chrf_pp_base = corpus_chrf(predicted_translations, [base_reference_translations], word_order=2)
+
+        fst_reference_translations: list[str] = [self._encode_reference(brt) for brt in base_reference_translations]
+
+        bleu_fst = corpus_bleu(predicted_translations, [fst_reference_translations])
+        chrf_fst = corpus_chrf(predicted_translations, [fst_reference_translations])
+        chrf_pp_fst = corpus_chrf(predicted_translations, [fst_reference_translations], word_order=2)
 
         return TranslationMetrics({
-            'bleu': bleu.score,
-            'chrf': chrf.score,
-            'chrf_pp': chrf_pp.score
+            'bleu_base': bleu_base.score,
+            'chrf_base': chrf_base.score,
+            'chrf_pp_base': chrf_pp_base.score,
+            'bleu_fst': bleu_fst.score,
+            'chrf_fst': chrf_fst.score,
+            'chrf_pp_fst': chrf_pp_fst.score,
         })
 
-    def _save_checkpoint(self, save_path: str, epoch: int, start_time: str) -> None:
-        checkpoint_name = f'{TranslationEvaluator._CHECKPOINT_STR_START}_epoch{epoch}_{start_time}'
-        full_path = os.path.join(save_path, checkpoint_name)
-        os.makedirs(full_path, exist_ok=True)
-        self.model.save_pretrained(full_path)
-        self.tokenizer.save_pretrained(full_path)
+    def _encode_reference(self, text: str) -> str:
+        '''
+        Processes text through encode_text and the tokenizer so the reference matches the
+        form it is trained to produce (including tags for morpheme markers).
+        '''
+        chunks = encode_text(text, self.tokenizer)
+        token_ids = cast(list[int], self.tokenizer(
+            chunks,
+            is_split_into_words=True,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=TranslationEvaluator._MAX_LENGTH,
+        )['input_ids'])
+
+        return cast(str, self.tokenizer.decode(
+            token_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        ))
 
     def _build_dataloader(
             self,
@@ -210,7 +243,7 @@ class TranslationEvaluator():
             shuffle: bool
     ) -> DataLoader[TokenizedBatch]:
         return qs_tokenized_dataloader(
-            self.dataset_dict[split].select(range(1000)),
+            self.dataset_dict[split],
             self.tokenizer,
             SPANISH_LANG_ID,
             batch_size,
@@ -232,10 +265,26 @@ class TranslationEvaluator():
             'val_losses': val_losses,
             'val_metrics': val_metrics
         })
+
+    def _save_checkpoint(self, save_folder_name: str, epoch: int, start_time: str) -> None:
+        checkpoint_name = f'{TranslationEvaluator._CHECKPOINT_STR_START}_epoch{epoch}_{start_time}'
+        full_path = os.path.join(save_folder_name, checkpoint_name)
+        self.model.save_pretrained(full_path)
+        self.tokenizer.save_pretrained(full_path)
+
+    def _save_training_results(self, results: TranslationTrainingResult, save_folder_name: str) -> None:
+        os.makedirs(save_folder_name, exist_ok=True)
+        full_path = os.path.join(save_folder_name, TranslationEvaluator._TRAINING_RESULTS_FILENAME)
+        with open(full_path, 'w') as f:
+            json.dump(results, f, indent=2)
+
     
     def _print_translation_metrics(self, metrics: TranslationMetrics) -> None:
         print(
-            f'\t- BLEU:   {metrics['bleu']:.3f}\n'
-            f'\t- chrF:   {metrics['chrf']:.3f}\n'
-            f'\t- chrF++: {metrics['chrf_pp']:.3f}'
+            f'\t- BLEU (base):   {metrics['bleu_base']:.3f}\n'
+            f'\t- chrF (base):   {metrics['chrf_base']:.3f}\n'
+            f'\t- chrF++ (base): {metrics['chrf_pp_base']:.3f}\n'
+            f'\t- BLEU (fst):   {metrics['bleu_fst']:.3f}\n'
+            f'\t- chrF (fst):   {metrics['chrf_fst']:.3f}\n'
+            f'\t- chrF++ (fst): {metrics['chrf_pp_fst']:.3f}'
         )
