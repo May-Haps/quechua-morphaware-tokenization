@@ -1,9 +1,9 @@
 from typing import Any, cast
 
-from datasets import load_dataset
 import torch
 
-from common.utils import get_device, get_lang_abbrev, load_model, SPANISH_LANG_ID, QUECHUA_LANG_ID
+from common.process_word_windows import clean_decoded_text
+from common.utils import get_device, get_lang_abbrev, load_dataset, load_model, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
 
@@ -66,11 +66,11 @@ if __name__ == '__main__':
                 num_beams=num_beams
             ))
 
-            generated_text = tokenizer.decode(
+            generated_text = clean_decoded_text(tokenizer.decode(
                 output[0],
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=True
-            )
+            ))
 
             print(f'--- Example {i + 1}/{n_samples} (token length: {sample["token_length"]}) ---')
             print(f'[ES]  {source_text}')

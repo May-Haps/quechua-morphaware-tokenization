@@ -1,6 +1,4 @@
-from datasets import load_dataset
-
-from common.utils import load_model, get_device
+from common.utils import load_model, load_dataset, get_device
 from common.vocab_extension import extract_new_tokens, extend_vocabulary
 
 '''
@@ -17,8 +15,10 @@ model_save_path = './nllb-model-fst'
 device = get_device()
 
 if __name__ == '__main__':
+    print('loading model')
     tokenizer, model = load_model(device, model_load_path)
 
+    print('loading dataset')
     qs_dataset_dict = load_dataset(quechua_spanish_dataset_id)
 
     dataset_strs = ['train', 'test', 'validation']

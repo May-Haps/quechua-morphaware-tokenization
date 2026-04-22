@@ -1,6 +1,6 @@
 from typing import Any, cast, Literal, TypedDict
 
-from datasets import Dataset
+from datasets import Dataset, DatasetDict, load_dataset as _load_dataset
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,6 +15,20 @@ class TokenizedBatch(TypedDict):
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
     labels: torch.Tensor
+
+_QUOTE_MAPPING = {
+    "’": "'",
+    "‘": "'",
+    '”': '"',
+    '“': '"'
+}
+
+def load_dataset(quechua_spanish_dataset_id: str = 'somosnlp-hackathon-2022/spanish-to-quechua') -> DatasetDict:
+    dataset = _load_dataset(quechua_spanish_dataset_id)
+    dataset['train'] = dataset['train'].map(_standardize_quotes)
+    dataset['validation'] = dataset['validation'].map(_standardize_quotes)
+    dataset['test'] = dataset['test'].map(_standardize_quotes)
+    return dataset
 
 def get_device():
     return 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -114,13 +128,13 @@ def _qs_tokenize_fst_fn(
         es_batch = batch['es']
 
         tokenizer.src_lang = QUECHUA_LANG_ID
-        qu_batch = [encode_text(t, tokenizer) for t in qu_batch]
+        qu_batch = [encode_text(t) for t in qu_batch]
         qu_encoded = tokenizer(
             qu_batch,
             padding=False,
             truncation=True,
             max_length=max_length,
-            is_split_into_words=True,
+            is_split_into_words=False,
             add_special_tokens=True,
         )
 
@@ -147,6 +161,12 @@ def _qs_tokenize_fst_fn(
             }
 
     return tokenize_helper
+
+def _standardize_quotes(example) -> str:
+    for key, value in _QUOTE_MAPPING.items():
+        example['es'] = example['es'].replace(key, value)
+        example['qu'] = example['qu'].replace(key, value)
+    return example
 
 # Dataset structure
 

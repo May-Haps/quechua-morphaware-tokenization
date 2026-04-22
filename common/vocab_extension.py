@@ -20,10 +20,6 @@ def extract_new_tokens(dataset: Dataset) -> set[str]:
         tokens_in_sample = get_unique_fst_morphemes(qu_sample)
         new_tokens.update(tokens_in_sample)
 
-    non_suffix_morphemes = set(filter(lambda x: not x.startswith('+'), new_tokens))
-    for morpheme in non_suffix_morphemes:
-        new_tokens.add(SPIECE_UNDERLINE + morpheme)
-
     return new_tokens
 
 def remove_prefix_tags(token: str) -> str:
@@ -32,12 +28,6 @@ def remove_prefix_tags(token: str) -> str:
         if token.startswith(pft):
             longest_pft_matched = max(longest_pft_matched, len(pft))
     return token[longest_pft_matched:]
-
-def _init_string(token: str) -> str:
-    base = remove_prefix_tags(token)
-    if token.startswith(SPIECE_UNDERLINE):
-        return ' ' + base
-    return base
 
 def extend_vocabulary(
         new_tokens: list[str],
@@ -60,7 +50,7 @@ def extend_vocabulary(
         tokenizer.src_lang = old_tokenizer_src_lang
         raise ValueError(f'found {len(overlapping_vocab)} new tokens in the old vocabulary: {overlapping_vocab}')
 
-    new_tokens_without_special = [_init_string(token) for token in new_tokens]
+    new_tokens_without_special = [remove_prefix_tags(token) for token in new_tokens]
 
     with torch.no_grad():
         old_token_conversions = cast(torch.Tensor, tokenizer(

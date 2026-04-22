@@ -11,7 +11,7 @@ from transformers import M2M100ForConditionalGeneration, NllbTokenizer
 from torch.utils.data import DataLoader
 
 from common.model_trainer import ModelTrainer
-from common.process_word_windows import encode_text
+from common.process_word_windows import clean_decoded_text, encode_text
 from common.utils import get_device, get_lang_abbrev, qs_tokenized_dataloader, TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 class TranslationTrainingConfig(TypedDict):
@@ -43,7 +43,6 @@ class TranslationEvaluator():
     _CHECKPOINT_STR_START = 'translation_checkpoint'
     _TRAINING_RESULTS_FILENAME = 'training_result.json'
     _MAX_LENGTH = 128
-    _MAX_LENGTH_RESPONSE = 160
     _NUM_BEAMS = 1
     _N_DATALOADER_WORKERS = 1
     _N_TOKENIZE_WORKERS = 4
@@ -134,7 +133,7 @@ class TranslationEvaluator():
         start_time = datetime.now().strftime('%Y%m%d_%H%M%S')
 
         for epoch in range(1, config['epochs'] + 1):
-            print(f'--------------- Epoch {epoch}/{config['epochs']} ---------------')
+            print(f'--------------- Epoch {epoch}/{config["epochs"]} ---------------')
             print(f'Starting training epoch...')
             train_loss = trainer.train_epoch(train_loader, config['batches_per_update'])
 
@@ -183,17 +182,18 @@ class TranslationEvaluator():
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     forced_bos_token_id=bos_target_lang,
-                    max_length=TranslationEvaluator._MAX_LENGTH_RESPONSE,
+                    max_length=TranslationEvaluator._MAX_LENGTH,
                     num_beams=TranslationEvaluator._NUM_BEAMS
                 ))
 
-                predicted_translations.extend(
-                    self.tokenizer.batch_decode(
-                        output,
-                        skip_special_tokens=True,
-                        clean_up_tokenization_spaces=True
-                    )
-                )
+            decoded_text = self.tokenizer.batch_decode(
+                output,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True
+            )
+
+            for text in decoded_text:
+                predicted_translations.append(clean_decoded_text(text))
 
         base_reference_translations: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
 
@@ -221,16 +221,16 @@ class TranslationEvaluator():
         Processes text through encode_text and the tokenizer so the reference matches the
         form it is trained to produce (including tags for morpheme markers).
         '''
-        chunks = encode_text(text, self.tokenizer)
+        chunks = encode_text(text)
         token_ids = cast(list[int], self.tokenizer(
             chunks,
-            is_split_into_words=True,
+            is_split_into_words=False,
             add_special_tokens=False,
             truncation=True,
             max_length=TranslationEvaluator._MAX_LENGTH,
         )['input_ids'])
 
-        return cast(str, self.tokenizer.decode(
+        return clean_decoded_text(self.tokenizer.decode(
             token_ids,
             skip_special_tokens=True,
             clean_up_tokenization_spaces=True,
@@ -281,10 +281,10 @@ class TranslationEvaluator():
     
     def _print_translation_metrics(self, metrics: TranslationMetrics) -> None:
         print(
-            f'\t- BLEU (base):   {metrics['bleu_base']:.3f}\n'
-            f'\t- chrF (base):   {metrics['chrf_base']:.3f}\n'
-            f'\t- chrF++ (base): {metrics['chrf_pp_base']:.3f}\n'
-            f'\t- BLEU (fst):   {metrics['bleu_fst']:.3f}\n'
-            f'\t- chrF (fst):   {metrics['chrf_fst']:.3f}\n'
-            f'\t- chrF++ (fst): {metrics['chrf_pp_fst']:.3f}'
+            f'\t- BLEU (base):   {metrics["bleu_base"]:.3f}\n'
+            f'\t- chrF (base):   {metrics["chrf_base"]:.3f}\n'
+            f'\t- chrF++ (base): {metrics["chrf_pp_base"]:.3f}\n'
+            f'\t- BLEU (fst):   {metrics["bleu_fst"]:.3f}\n'
+            f'\t- chrF (fst):   {metrics["chrf_fst"]:.3f}\n'
+            f'\t- chrF++ (fst): {metrics["chrf_pp_fst"]:.3f}'
         )

@@ -1,8 +1,6 @@
-from datasets import load_dataset
-
 from transformers import NllbTokenizer
 
-from common.utils import get_device, load_model
+from common.utils import get_device, load_dataset, load_model
 from common.model_evaluator import TranslationEvaluator, TranslationTrainingConfig
 
 def _get_vocab_size(model_path: str) -> int:
@@ -34,9 +32,9 @@ if __name__ == '__main__':
     )
 
     config: TranslationTrainingConfig = {
-        'epochs': 3,
-        'batch_size': 1,
-        'batches_per_update': 16,
+        'epochs': 20,
+        'batch_size': 16,
+        'batches_per_update': 1,
         'lr': 1e-4,
         'weight_decay': 0.01,
         'warmup_steps_frac': 0.1,

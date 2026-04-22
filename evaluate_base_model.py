@@ -1,11 +1,11 @@
 from typing import cast
 
-from datasets import load_dataset
 from sacrebleu import corpus_bleu, corpus_chrf
 import torch
 
-from common.utils import get_device, get_lang_abbrev, load_model, TokenizedBatch, qs_tokenized_dataloader, \
-    SPANISH_LANG_ID, QUECHUA_LANG_ID
+from common.process_word_windows import clean_decoded_text
+from common.utils import get_device, get_lang_abbrev, load_dataset, load_model, TokenizedBatch, \
+    qs_tokenized_dataloader, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 # DOCS: https://huggingface.co/docs/transformers/model_doc/nllb
 
@@ -68,13 +68,15 @@ if __name__ == '__main__':
                 num_beams=num_beams
             ))
 
-            predicted_translation.extend(
-                tokenizer.batch_decode(
-                    output,
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True
-                )
+            decoded_text = tokenizer.batch_decode(
+                output,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True
             )
+
+            for text in decoded_text:
+                predicted_translation.append(clean_decoded_text(text))
+
 
     bleu_score = corpus_bleu(predicted_translation, [reference_translations])
     chrf_score = corpus_chrf(predicted_translation, [reference_translations])
