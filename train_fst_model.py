@@ -34,14 +34,14 @@ if __name__ == '__main__':
     )
 
     config: TranslationTrainingConfig = {
-        'epochs': 3,
-        'batch_size': 1,
+        'epochs': 20,
+        'batch_size': 4,
         'batches_per_update': 16,
         'lr': 1e-4,
         'weight_decay': 0.01,
         'warmup_steps_frac': 0.1,
         'grad_clip_max_norm': 1.0,
-        'eval_freq': 1,
+        'eval_freq': 3,
         'save_folder_name': model_save_path,
     }
 

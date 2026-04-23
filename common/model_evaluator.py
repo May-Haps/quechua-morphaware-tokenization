@@ -272,6 +272,16 @@ class TranslationEvaluator():
         self.model.save_pretrained(full_path)
         self.tokenizer.save_pretrained(full_path)
 
+        existing = sorted(
+            [d for d in os.listdir(save_folder_name) if d.startswith(TranslationEvaluator._CHECKPOINT_STR_START)],
+            key=lambda d: os.path.getmtime(os.path.join(save_folder_name, d))
+        )
+        for old in existing[:-2]:
+            old_path = os.path.join(save_folder_name, old)
+            for f in os.listdir(old_path):
+                os.remove(os.path.join(old_path, f))
+            os.rmdir(old_path)
+
     def _save_training_results(self, results: TranslationTrainingResult, save_folder_name: str) -> None:
         os.makedirs(save_folder_name, exist_ok=True)
         full_path = os.path.join(save_folder_name, TranslationEvaluator._TRAINING_RESULTS_FILENAME)

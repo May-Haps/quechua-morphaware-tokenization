@@ -11,6 +11,10 @@ from common.process_word_windows import encode_text
 QUECHUA_LANG_ID: Literal['quy_Latn'] = 'quy_Latn'
 SPANISH_LANG_ID: Literal['spa_Latn'] = 'spa_Latn'
 
+def decode_fst_output(text: str) -> str:
+    '''Converts FST-segmented model output back into natural Quechua words.'''
+    return ' '.join(text.replace('=', ' ').replace('+', '').split())
+
 class TokenizedBatch(TypedDict):
     input_ids: torch.Tensor
     attention_mask: torch.Tensor
