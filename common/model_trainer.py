@@ -1,8 +1,10 @@
+import json
 from typing import cast
+import os
 
 import torch
 from torch.utils.data import DataLoader
-from transformers import get_linear_schedule_with_warmup, M2M100ForConditionalGeneration, NllbTokenizer
+from transformers import get_linear_schedule_with_warmup, M2M100ForConditionalGeneration
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
 from common.utils import get_device, TokenizedBatch
@@ -13,10 +15,10 @@ class ModelTrainer():
     def __init__(
             self,
             modified_model: M2M100ForConditionalGeneration,
-            modified_tokenizer: NllbTokenizer,
             n_training_epochs: int,
             n_batches_train_dataset: int,
             batches_per_update: int,
+            old_vocab_size: int,
             lr: float = 1e-4,
             weight_decay: float = 0.01,
             warmup_steps_frac: float = 0.1,
@@ -25,20 +27,28 @@ class ModelTrainer():
     ) -> None:
         self.device = get_device() if device is None else device
         self.model =  modified_model
-        self.tokenizer = modified_tokenizer
+
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
 
         batches_per_epoch = n_batches_train_dataset // batches_per_update + (0 if n_batches_train_dataset % batches_per_update == 0 else 1)
         total_train_steps = n_training_epochs * batches_per_epoch
 
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.num_warmup_steps = int(total_train_steps * warmup_steps_frac)
+        self.num_training_steps = total_train_steps
+
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
-            num_warmup_steps=int(total_train_steps * warmup_steps_frac),
+            num_warmup_steps=self.num_warmup_steps,
             num_training_steps=total_train_steps
         )
         self.grad_clip_max_norm = grad_clip_max_norm
 
         self.hook_handle = None
+
+        self.freeze_old_embeddings(old_vocab_size)
+        self.freeze_encoder()
 
     def freeze_old_embeddings(self, old_vocab_size: int) -> None:
         '''Freeze the embeddings non-FST tokens.'''
@@ -71,7 +81,7 @@ class ModelTrainer():
             self,
             dataset_loader: DataLoader[TokenizedBatch],
             batches_per_update: int,
-            n_batches_per_print: int = 50
+            n_batches_per_print: int = 100
     ) -> float:
         '''
         Train for one epoch using the given dataset loader. To minimze max GPU utilization gradients are 
@@ -121,7 +131,7 @@ class ModelTrainer():
     def eval_epoch(
             self,
             dataset_loader: DataLoader[TokenizedBatch],
-            n_batches_per_print: int = 50
+            n_batches_per_print: int = 100
     ) -> float:
         '''Computes the loss of the model on the given dataset.'''
         self.model.eval()
@@ -146,3 +156,55 @@ class ModelTrainer():
                 total_loss += loss.item()
 
         return total_loss / len(dataset_loader)
+
+    def load_checkpoint(
+            self,
+            checkpoint_path: str,
+            old_vocab_size: int
+    ) -> tuple[int, list[float], list[float], list]:
+        del self.model
+        del self.optimizer
+        del self.scheduler
+        torch.cuda.empty_cache()
+        
+        self.model = M2M100ForConditionalGeneration.from_pretrained(checkpoint_path).to(self.device)
+
+        self.hook_handle = None
+        self.freeze_old_embeddings(old_vocab_size)
+        self.freeze_encoder()
+
+        state = torch.load(
+            os.path.join(checkpoint_path, 'training_state.pt'),
+            map_location=self.device
+        )
+
+
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.lr,
+            weight_decay=self.weight_decay
+        )
+
+        self.optimizer.load_state_dict(state['optimizer_state_dict'])
+
+        self.scheduler = get_linear_schedule_with_warmup(
+            self.optimizer,
+            num_warmup_steps=self.num_warmup_steps,
+            num_training_steps=self.num_training_steps
+        )
+
+        self.scheduler.load_state_dict(state['scheduler_state_dict'])
+
+        history_path = os.path.join(checkpoint_path, "training_result.json")
+
+        train_losses = []
+        val_losses = []
+        val_metrics = []
+        
+        with open(history_path, "r") as f:
+            history = json.load(f)
+            train_losses = history['train_losses']
+            val_losses = history['val_losses']
+            val_metrics = history['val_metrics']
+        
+        return state['epoch'], train_losses, val_losses, val_metrics
