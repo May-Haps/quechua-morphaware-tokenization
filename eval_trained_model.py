@@ -40,6 +40,5 @@ if __name__ == '__main__':
     evaluator.eval_model(
         batch_size=batch_size,
         split=split,
-        use_decoded_fst_output=use_decoded_fst_output,
-        log_freq=50
+        use_decoded_fst_output=use_decoded_fst_output
     )
