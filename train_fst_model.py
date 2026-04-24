@@ -1,6 +1,4 @@
-from transformers import NllbTokenizer
-
-from common.utils import get_device, load_dataset, load_model
+from common.utils import get_device
 from common.model_evaluator import TranslationEvaluator, TranslationTrainingConfig
 
 '''
@@ -30,6 +28,8 @@ if __name__ == '__main__':
         'eval_freq': 1,
         'save_folder_name': model_save_path,
     }
+
+    use_decoded_fst_output = True
 
 
     evaluator = TranslationEvaluator(

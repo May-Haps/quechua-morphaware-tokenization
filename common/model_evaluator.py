@@ -6,15 +6,14 @@ import re
 import os
 
 import torch
-from datasets import DatasetDict
 from sacrebleu import corpus_bleu, corpus_chrf
 from transformers import M2M100ForConditionalGeneration, NllbTokenizer
 from torch.utils.data import DataLoader
 
 from common.model_trainer import ModelTrainer
 from common.process_word_windows import clean_decoded_text, encode_text
-from common.utils import  get_lang_abbrev, load_dataset, load_model, qs_tokenized_dataloader, \
-    TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
+from common.utils import  decode_fst_output, get_lang_abbrev, load_dataset, load_model, \
+    qs_tokenized_dataloader, TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 def _get_vocab_size(model_path: str) -> int:
     return len(NllbTokenizer.from_pretrained(model_path))
@@ -51,7 +50,7 @@ class TranslationEvaluator():
     _NUM_BEAMS = 1
     _N_DATALOADER_WORKERS = 1
     _N_TOKENIZE_WORKERS = 4
-    _TRANSLATION_BATCHES_PER_PRINT = 1000
+    _TRANSLATION_BATCHES_PER_PRINT = 100
 
     def __init__(
             self,
@@ -126,11 +125,12 @@ class TranslationEvaluator():
     def eval_model(
             self,
             batch_size: int,
-            split: str = 'test'
+            split: str = 'test',
+            use_decoded_fst_output: bool = False,
     ) -> TranslationMetrics:
         '''Evaluates the model on the given dataset split with BLEU, chrF, and chrF++ translation metrics.'''
         loader = self._build_dataloader(split, batch_size, shuffle=False)
-        metrics = self._compute_translation_metrics(loader, split)
+        metrics = self._compute_translation_metrics(loader, split, use_decoded_fst_output)
         self._print_translation_metrics(metrics)
         return metrics
 
@@ -168,7 +168,8 @@ class TranslationEvaluator():
     def _compute_translation_metrics(
             self,
             data_loader: DataLoader[TokenizedBatch],
-            split: str
+            split: str,
+            use_decoded_fst_ouput: bool = False
     ) -> TranslationMetrics:
         dataset = self.dataset_dict[split]
         predicted_translations: list[str] = []
@@ -177,6 +178,11 @@ class TranslationEvaluator():
 
         self.trainer.model.eval()
         n_batches = len(data_loader)
+
+        def identity(text: str) -> str:
+            return text
+        
+        additional_decode = decode_fst_output if use_decoded_fst_ouput else identity
 
         with torch.no_grad():
             for i, batch in enumerate(data_loader):
@@ -202,7 +208,7 @@ class TranslationEvaluator():
                 )
 
                 for text in decoded_text:
-                    predicted_translations.append(clean_decoded_text(text))
+                    predicted_translations.append(additional_decode(clean_decoded_text(text)))
 
         base_reference_translations: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
 
@@ -211,10 +217,11 @@ class TranslationEvaluator():
         chrf_pp_base = corpus_chrf(predicted_translations, [base_reference_translations], word_order=2)
 
         if (split in self.cached_reference_translations):
-            fst_reference_translations = self.cached_reference_translations[split]
+            fst_reference_translations = list(map(additional_decode, self.cached_reference_translations[split]))
         else:
             fst_reference_translations: list[str] = [self._encode_reference(brt) for brt in base_reference_translations]
             self.cached_reference_translations[split] = fst_reference_translations
+            fst_reference_translations = list(map(additional_decode, fst_reference_translations))
 
         bleu_fst = corpus_bleu(predicted_translations, [fst_reference_translations])
         chrf_fst = corpus_chrf(predicted_translations, [fst_reference_translations])

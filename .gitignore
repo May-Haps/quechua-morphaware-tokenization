@@ -213,4 +213,8 @@ nllb-model-fst-trained/
 checkpoints/
 
 # AWS credentials
-*.pem
+*.
+
+plots/
+old/
+.vscode/

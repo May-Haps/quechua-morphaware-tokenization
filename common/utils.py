@@ -23,6 +23,10 @@ _QUOTE_MAPPING = {
     '“': '"'
 }
 
+def decode_fst_output(text: str) -> str:
+    '''Converts FST-segmented model output back into natural Quechua words.'''
+    return text.replace('=', '').replace('+', '').replace('⩲', '')
+
 def load_dataset(quechua_spanish_dataset_id: str = 'somosnlp-hackathon-2022/spanish-to-quechua') -> DatasetDict:
     dataset = _load_dataset(quechua_spanish_dataset_id)
     dataset['train'] = dataset['train'].map(_standardize_quotes)

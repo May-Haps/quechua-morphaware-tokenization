@@ -8,26 +8,22 @@ against both the base reference translations and the FST-encoded reference trans
 
 quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
 base_model_load_path = 'nllb-model'
-model_load_path = './nllb-model-fst-trained/translation_checkpoint_epoch10_20260422_201116'
+model_load_path = './nllb-model-final-ckpt'
 model_save_path = None
 
-batch_size = 8
+batch_size = 4
 split = 'test'
 
+use_decoded_fst_output = False
 
 if __name__ == '__main__':
     device = 'cpu'
     # device = get_device()
 
-    # The constructor requires a full TranslationTrainingConfig, but for pure
-    # evaluation only batch_size is meaningfully used (by the train/val loaders
-    # that __init__ builds unconditionally). The training hyperparameters below
-    # just need to satisfy the assertions. save_folder_name=None skips the
-    # checkpoint-resume branch in __init__.
     config: TranslationTrainingConfig = {
         'epochs': 20,
-        'batch_size': 8,
-        'batches_per_update': 2,
+        'batch_size': 1,
+        'batches_per_update': 16,
         'lr': 1e-4,
         'weight_decay': 0.01,
         'warmup_steps_frac': 0.1,
@@ -44,4 +40,4 @@ if __name__ == '__main__':
         device=device,
     )
 
-    evaluator.eval_model(batch_size=batch_size, split=split)
+    evaluator.eval_model(batch_size=batch_size, split=split, use_decoded_fst_output=use_decoded_fst_output)
