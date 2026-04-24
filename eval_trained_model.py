@@ -20,7 +20,7 @@ model_load_path = 'nllb-model-fst-trained/'
 
 batch_size = 8
 split = 'test'
-use_decoded_fst_output = True
+use_decoded_fst_output = False
 
 if __name__ == '__main__':
     device = get_device()
@@ -40,5 +40,6 @@ if __name__ == '__main__':
     evaluator.eval_model(
         batch_size=batch_size,
         split=split,
-        use_decoded_fst_output=use_decoded_fst_output
+        use_decoded_fst_output=use_decoded_fst_output,
+        log_freq=50
     )
