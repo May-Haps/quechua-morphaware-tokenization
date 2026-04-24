@@ -20,7 +20,7 @@ model_load_path = 'nllb-model-fst-trained/'
 
 batch_size = 8
 split = 'test'
-use_decoded_fst_output = False
+use_decoded_fst_output = True
 
 if __name__ == '__main__':
     device = get_device()
