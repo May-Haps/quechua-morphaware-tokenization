@@ -209,6 +209,7 @@ __marimo__/
 nllb-model/
 
 nllb-model-fst/
+nllb-model-fst-trained/
 checkpoints/
 
 # AWS credentials
