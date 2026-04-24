@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader
 
 from common.model_trainer import ModelTrainer
 from common.process_word_windows import encode_text
-from common.utils import get_device, get_lang_abbrev, qs_tokenized_dataloader, TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
+from common.utils import decode_fst_output, get_device, get_lang_abbrev, qs_tokenized_dataloader, \
+    TokenizedBatch, SPANISH_LANG_ID, QUECHUA_LANG_ID
 
 class TranslationTrainingConfig(TypedDict):
     epochs: int
@@ -112,11 +113,12 @@ class TranslationEvaluator():
     def eval_model(
             self,
             batch_size: int,
-            split: str = 'test'
+            split: str = 'test',
+            use_decoded_fst_output: bool = False
     ) -> TranslationMetrics:
         '''Evaluates the model on the given dataset split with BLEU, chrF, and chrF++ translation metrics.'''
         loader = self._build_dataloader(split, batch_size=batch_size, shuffle=False)
-        metrics = self._compute_translation_metrics(loader, split)
+        metrics = self._compute_translation_metrics(loader, split, use_decoded_fst_output)
         self._print_translation_metrics(metrics)
         return metrics
 
@@ -160,7 +162,8 @@ class TranslationEvaluator():
     def _compute_translation_metrics(
             self,
             data_loader: DataLoader[TokenizedBatch],
-            split: str
+            split: str,
+            use_decode_fst_output: bool = False,
     ) -> TranslationMetrics:
         dataset = self.dataset_dict[split]
         predicted_translations: list[str] = []
@@ -187,13 +190,16 @@ class TranslationEvaluator():
                     num_beams=TranslationEvaluator._NUM_BEAMS
                 ))
 
-                predicted_translations.extend(
-                    self.tokenizer.batch_decode(
-                        output,
-                        skip_special_tokens=True,
-                        clean_up_tokenization_spaces=True
-                    )
+                decoded_batch = self.tokenizer.batch_decode(
+                    output,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True
                 )
+
+                if use_decode_fst_output:
+                    decoded_batch = map(decode_fst_output, decoded_batch)
+
+                predicted_translations.extend(decoded_batch)
 
         base_reference_translations: list[str] = dataset[get_lang_abbrev(QUECHUA_LANG_ID)]
 
@@ -201,7 +207,10 @@ class TranslationEvaluator():
         chrf_base = corpus_chrf(predicted_translations, [base_reference_translations])
         chrf_pp_base = corpus_chrf(predicted_translations, [base_reference_translations], word_order=2)
 
-        fst_reference_translations: list[str] = [self._encode_reference(brt) for brt in base_reference_translations]
+        def identity(x: str): return x
+        map_fn = decode_fst_output if use_decode_fst_output else identity
+
+        fst_reference_translations: list[str] = [map_fn(self._encode_reference(brt)) for brt in base_reference_translations]
 
         bleu_fst = corpus_bleu(predicted_translations, [fst_reference_translations])
         chrf_fst = corpus_chrf(predicted_translations, [fst_reference_translations])

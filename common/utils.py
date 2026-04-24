@@ -13,7 +13,7 @@ SPANISH_LANG_ID: Literal['spa_Latn'] = 'spa_Latn'
 
 def decode_fst_output(text: str) -> str:
     '''Converts FST-segmented model output back into natural Quechua words.'''
-    return ' '.join(text.replace('=', ' ').replace('+', '').split())
+    return ' '.join(text.replace('=', ' ').replace('+', '').replace('⩲', '').split())
 
 class TokenizedBatch(TypedDict):
     input_ids: torch.Tensor
