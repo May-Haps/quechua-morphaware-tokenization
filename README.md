@@ -38,15 +38,15 @@ translation performance.
 We trained two variants of the FST-tokenized model that differ in how they
 mark word boundaries:
 
-- **WIM (Word Initial Morphemes)** — *this branch (`main`).* Every morpheme
-  that can appear word-initially (roots and parts of speech) gets a duplicate
-  embedding for its word-initial form, mirroring how NLLB's original
-  tokenizer represents word boundaries with the `▁` prefix on the first
-  subword of each word.
-- **ND (No Duplicates)** — *available on the [`no-dup-fst`](../../tree/no-dup-fst) branch.*
-  Word boundaries are encoded with lone SentencePiece start-of-word tokens
-  (`▁`) inserted between words. Each FST morpheme has a single embedding
-  regardless of position in the word.
+- **ND (No Duplicates)** — *this branch (`no-dup-fst`).* Word boundaries are
+  encoded with lone SentencePiece start-of-word tokens (`▁`) inserted between
+  words. Each FST morpheme has a single embedding regardless of position in
+  the word.
+- **WIM (Word Initial Morphemes)** — *available on the [`main`](../../tree/main) branch.*
+  Every morpheme that can appear word-initially (roots and parts of speech)
+  gets a duplicate embedding for its word-initial form, mirroring how NLLB's
+  original tokenizer represents word boundaries with the `▁` prefix on the
+  first subword of each word.
 
 ND is the stronger of the two variants on every metric (see results below);
 check out the `no-dup-fst` branch to reproduce those numbers.
