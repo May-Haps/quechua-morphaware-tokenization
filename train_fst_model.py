@@ -10,7 +10,7 @@ def _get_vocab_size(model_path: str) -> int:
 
 '''
 This script runs the training process with our fst morpheme aware model. Run extend_model_vocabulary.py
-before this. On my machine, running the training process with these parameters uses just under 8Gbs of VRAM.
+before this.
 '''
 
 quechua_spanish_dataset_id = 'somosnlp-hackathon-2022/spanish-to-quechua'
